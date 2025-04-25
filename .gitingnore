@@ -1,0 +1,17 @@
+# Virtual environments
+.venv/
+env/
+venv/
+
+# Compile python files
+*.pyc
+__pycache__/
+
+# Jupyter notebook checkpoints
+.ipynb_checkpoints/
+
+# specific OS files
+.DS_Store
+Thumbs.db
+*.swp
+*.swo

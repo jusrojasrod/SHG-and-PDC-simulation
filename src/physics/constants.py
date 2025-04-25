@@ -1,0 +1,1 @@
+SPEED_OF_LIGHT_M_PER_S: float = 299792458.0  # speed of light in vacuum in meters per second
