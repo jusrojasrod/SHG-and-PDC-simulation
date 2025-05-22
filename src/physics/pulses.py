@@ -93,7 +93,7 @@ class GaussianPulse1D:
         right = self.center + self.times_std * self.sigma
         return np.linspace(left, right, self.steps)
     
-    def generate_pulse(self) -> Tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]:
+    def generate_pulse(self, normalization=True) -> Tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]:
         """
         Generates the Gaussian pulse over the domain.
 
@@ -102,9 +102,13 @@ class GaussianPulse1D:
         tuple of ndarray
             The x-values and the corresponding Gaussian amplitude values.
         """
-        return self.x_values, np.exp(-((self.x_values - self.center) ** 2) / (4 * self.sigma ** 2))
+        pulse = np.exp(-((self.x_values - self.center) ** 2) / (4 * self.sigma ** 2))
+        if normalization == True:
+            return self.x_values, (1 / (np.sqrt(2 * np.pi) * self.sigma)) * pulse
+        return self.x_values, pulse
     
-    def generate_intensity(self):
+   
+    def generate_intensity(self, normalization=True):
         """
         Generates the intensity of the Gaussian pulse over the domain.
 
@@ -112,8 +116,10 @@ class GaussianPulse1D:
             tuple of ndarray
             The x-values and the corresponding intensity values.
         """
-        return self.x_values, np.exp(-((self.x_values - self.center) ** 2) / (4 * self.sigma ** 2))**2
-    
+        _, intensity = np.abs(self.generate_pulse(normalization=normalization)) ** 2
+
+        return self.x_values, intensity
+
     @property
     def computed_FWHM(self) -> float:
         """
