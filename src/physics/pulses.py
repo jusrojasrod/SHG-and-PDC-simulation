@@ -1,6 +1,9 @@
 import numpy as np
 from typing import Optional, Tuple, Dict, Any
 import numpy.typing as npt
+from scipy.interpolate import interp1d
+from scipy.optimize import brentq
+import matplotlib.pyplot as plt
 
 class GaussianPulse1D:
     """
@@ -18,7 +21,7 @@ class GaussianPulse1D:
         Standard deviation of the Gaussian. If not provided, it is computed from the FWHM.
     x_values : array_like, optional
         Custom domain values. If None, a symmetric Gaussian domain is computed.
-    times_std : float, optional
+    domain_width_std : float, optional
         Number of standard deviations to include on each side of the center (default is 5).
 
     Attributes
@@ -31,7 +34,7 @@ class GaussianPulse1D:
         Standard deviation of the Gaussian.
     steps : int
         Number of discretization steps.
-    times_std : float
+    domain_width_std : float
         Number of standard deviations used to define the domain.
     x_values : ndarray
         Domain over which the Gaussian pulse is defined.
@@ -41,8 +44,8 @@ class GaussianPulse1D:
     Create a Gaussian pulse and plot it:
 
     >>> import matplotlib.pyplot as plt
-    >>> pulse = Pulse(x0=0, FWHM=2, steps=1000)
-    >>> x, y = pulse.gaussian()
+    >>> pulse = GaussianPulse1D(x0=0, FWHM=2, steps=1000)
+    >>> x, y = pulse.generate_pulse()
     >>> plt.plot(x, y)
     >>> plt.show()
     """
@@ -54,7 +57,7 @@ class GaussianPulse1D:
         steps: int = 500,
         std: Optional[float] = None,
         x_values: Optional[npt.ArrayLike] = None,
-        times_std: float = 5
+        domain_width_std: float = 5
     ) -> None:
         
         # Gaussian parameters
@@ -64,10 +67,14 @@ class GaussianPulse1D:
         
         # Simulation parameters
         self.steps: int = steps
-        self.times_std: float = times_std
+        self.domain_width_std: float = domain_width_std
         self.x_values: npt.NDArray[np.float64] = (
             np.asarray(x_values, dtype=np.float64) if x_values is not None else self.gaussian_domain()
         )
+        
+        # Cache
+        self._pulse_cache = None
+        self._intensity_cache = None
     
     def standard_deviation(self) -> float:
         """
@@ -80,17 +87,19 @@ class GaussianPulse1D:
         """
         return self.FWHM / (2 * np.sqrt(2 * np.log(2)))
     
-    def gaussian_domain(self) -> npt.NDArray[np.float64]:
+    def gaussian_domain(self, left_std: float = None, right_std: float = None) -> npt.NDArray[np.float64]:
         """
-        Generates a symmetric domain around the center based on `times_std` and `sigma`.
+        Generates a symmetric domain around the center based on `domain_width_std` and `sigma`.
 
         Returns
         -------
         ndarray
             Linearly spaced values covering the Gaussian pulse.
         """
-        left = self.center - self.times_std * self.sigma
-        right = self.center + self.times_std * self.sigma
+        left_std = self.domain_width_std if left_std is None else left_std
+        right_std = self.domain_width_std if right_std is None else right_std
+        left = self.center - left_std * self.sigma
+        right = self.center + right_std * self.sigma
         return np.linspace(left, right, self.steps)
     
     def generate_pulse(self, normalization=True) -> Tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]:
@@ -102,9 +111,12 @@ class GaussianPulse1D:
         tuple of ndarray
             The x-values and the corresponding Gaussian amplitude values.
         """
-        pulse = np.exp(-((self.x_values - self.center) ** 2) / (4 * self.sigma ** 2))
-        if normalization == True:
-            return self.x_values, (1 / (np.sqrt(2 * np.pi) * self.sigma)) * pulse
+        if self._pulse_cache is not None and normalization == self._pulse_cache[1]:
+            return self._pulse_cache[0]
+        pulse = np.exp(-((self.x_values - self.center) ** 2) / (2 * self.sigma ** 2))
+        if normalization:
+            pulse = (1 / (np.sqrt(2 * np.pi) * self.sigma)) * pulse
+        self._pulse_cache = (self.x_values, pulse), normalization
         return self.x_values, pulse
     
    
@@ -116,35 +128,73 @@ class GaussianPulse1D:
             tuple of ndarray
             The x-values and the corresponding intensity values.
         """
-        _, intensity = np.abs(self.generate_pulse(normalization=normalization)) ** 2
+        if self._intensity_cache is not None and normalization == self._intensity_cache[1]:
+            print("--- Using cached intensity data ---")
+            return self._intensity_cache[0]
+        x, pulse = self.generate_pulse(normalization=normalization)
+        intensity = np.abs(pulse) ** 2
+        self._intensity_cache = (x, intensity), normalization
+        return x, intensity
 
-        return self.x_values, intensity
-
-    @property
-    def computed_FWHM(self) -> float:
+    def computed_FWHM(self, who='pulse', normalization=False) -> float:
         """
         Computes the FWHM of the generated Gaussian pulse from its intensity profile.
 
+        Parameters
+        ----------
+        who : str, optional
+            Specify whether to compute FWHM from 'pulse' or 'intensity'.
+        normalization : bool, optional
+            Whether to normalize the pulse/intensity before computing FWHM. Defaults to False.    
+            
         Returns
         -------
         float
             The computed Full Width at Half Maximum.
         """
-        x, intensity = self.generate_intensity()
+        if who == 'intensity':
+            x, intensity = self.generate_intensity(normalization=normalization)
+        elif who == 'pulse':
+            x, intensity = self.generate_pulse(normalization=normalization)
+        else:
+            raise ValueError("Parameter 'who' must be either 'pulse' or 'intensity'.")
         half_max = np.max(intensity) / 2
-        indices = np.where(intensity >= half_max)[0]
-        return x[indices[-1]] - x[indices[0]]
+        max_idx = np.argmax(intensity)
+
+        # Interpolación lineal
+        f = interp1d(x, intensity - half_max, kind='linear')
+
+        # Encontrar raíces a la izquierda y derecha del máximo
+        try:
+            # Lado izquierdo: buscar raíz entre el inicio y el máximo
+            left_root = brentq(f, x[0], x[max_idx])
+            # Lado derecho: buscar raíz entre el máximo y el final
+            right_root = brentq(f, x[max_idx], x[-1])
+        except ValueError as e:
+            raise ValueError("Cannot compute FWHM: no roots found in the expected interval.") from e
+
+        return float(right_root - left_root)
     
-    def as_dict(self) -> Dict[str, float]:
+    def as_dict(self) -> Dict[str, Any]:
         """Return pulse parameters as a dictionary."""
         return {
             "center": self.center,
             "FWHM": self.FWHM,
             "sigma": self.sigma,
             "steps": self.steps,
-            "times_std": self.times_std,
-            "computed_FWHM": self.computed_FWHM
+            "domain_width_std": self.domain_width_std,
+            "computed_FWHM": self.computed_FWHM(who='pulse', normalization=False)
         }
+        
+    def plot(self, who='pulse', normalization=True, ax=None):
+        if ax is None:
+            fig, ax = plt.subplots()
+        x, y = self.generate_pulse(normalization) if who == 'pulse' else self.generate_intensity(normalization)
+        ax.plot(x, y, color='red')
+        ax.set_xlabel('x')
+        ax.set_ylabel('Amplitude' if who == 'pulse' else 'Intensity')
+        ax.grid(True)
+        return ax
         
         
 class GaussianPulse2D:
