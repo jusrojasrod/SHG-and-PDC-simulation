@@ -413,7 +413,7 @@ def format_value(value):
     if isinstance(value, float):
         # Si el valor es demasiado pequeño, usamos notación científica
         if abs(value) < 1e-3 or abs(value) > 1e3:
-            return f"{value:.2e}"
+            return f"{value:.4e}"
         # Si no es pequeño, se usa formato con dos decimales
-        return f"{value:.2f}"
+        return f"{value:.4f}"
     return value
