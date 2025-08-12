@@ -383,6 +383,33 @@ class KTPCrystal_Kato:
              return np.nan
 
         return np.sqrt(n_squared)
+    
+
+def poling_period(lambda_fundametal_nm: float, crystal: KTPCrystal) -> float:
+    """
+    Calculate the poling period for second harmonic generation (SHG).
+    
+    Parameters
+    ----------
+    lambda_fundametal_nm : float
+        The fundamental wavelength in nanometers (nm).
+    crystal : KTPCrsystal
+        The KTP crystal  instance used for optical properties.
+        
+    Returns
+    -------
+    float
+        The poling period in micrometers (um).
+    """
+    lambda_fundamental_um = lambda_fundametal_nm * 1e-3 # convert nm to um
+    
+    # Refractive indices
+    n_fundamental = crystal.refractive_index(lambda_fundamental_um, axis='nz')
+    n_harmonic = crystal.refractive_index(lambda_fundamental_um / 2, axis='nz')
+    
+    # Poling period calculation
+    poling_period = ( lambda_fundamental_um / 2) * (1 / (n_harmonic - n_fundamental))  # (m)
+    return poling_period
         
 
 if __name__ == "__main__":
