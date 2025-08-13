@@ -2,6 +2,7 @@ import numpy as np
 from typing import Union, Dict, List
 
 from .crystals import KTPCrystal
+from .math import conv_discrete
 
 
 class PhaseMatching:
@@ -70,39 +71,6 @@ class PhaseMatching:
         # Calculate phase mismatch in m^-1
         delta_k = gvm_term * (omega - omega_SHG_0)
         return delta_k
-
-    # def phase_matching_function(self, delta_k: Union[float, np.ndarray], L: float) -> Union[float, np.ndarray]:
-    #     """
-    #     Calculates the phase matching function Phi for second harmonic generation (SHG).
-
-    #     Parameters
-    #     ----------
-    #     delta_k : float or array
-    #         The phase mismatch in m^-1.
-    #     L : float
-    #         The length of the crystal in meters. Must be positive.
-
-    #     Returns
-    #     -------
-    #     float or array
-    #         The phase matching function Phi (dimensionless).
-
-    #     Notes
-    #     -----
-    #     Phi = sinc(delta_k * L / 2) = sin(delta_k * L / 2) / (delta_k * L / 2)
-
-    #     Raises
-    #     ------
-    #     ValueError
-    #         If L is not positive.
-    #     """
-    #     if L <= 0:
-    #         raise ValueError("Crystal length L must be positive.")
-
-    #     delta_k = np.asarray(delta_k)
-    #     arg = delta_k * L / 2
-    #     phi = np.sinc(arg / np.pi)  # np.sinc(x) = sin(pi*x)/(pi*x)
-    #     return phi
     
     def phase_matching_function(self, omega: Union[float, np.ndarray], L: float, Lambda_um: float = None, axis: str = 'nz') -> Union[float, np.ndarray]:
         """
@@ -149,3 +117,70 @@ class PhaseMatching:
         arg = delta_k_eff * L / 2
         phi = np.sinc(arg / np.pi)  # np.sinc(x) = sin(pi*x)/(pi*x)
         return phi
+    
+
+def second_harmonic_generation(pulse_y, pulse_x, SHG_frequencies, fundamental_wavelength_um, cavity_length, poling_period_um=None):
+    """
+    Calcula la amplitud de la segunda armónica generada a partir de un pulso Gaussiano.
+
+    Parameters:
+    -----------
+    pulse_y : numpy.ndarray
+        Envolvente del campo eléctrico del pulso fundamental en el dominio de frecuencia.
+    pulse_x : numpy.ndarray
+        Frecuencias del pulso fundamental (dominio de entrada).
+    SHG_frequencies : numpy.ndarray
+        Frecuencias de la segunda armónica, con la misma longitud que pulse_x.
+    fundamental_wavelength_um : float
+        Longitud de onda fundamental en micrómetros (ej. 0.795 para 795 nm).
+    cavity_length : float
+        Longitud del cristal en metros (ej. 4e-3 para 4 mm).
+    poling_period_um : float, optional
+        Período de quasi-phase matching en micrómetros (ej. 3.19). Si None, se usa phase matching estándar.
+
+    Returns:
+    --------
+    tuple
+        - SHG_amplitude : numpy.ndarray
+            Amplitud del campo eléctrico de la segunda armónica en el dominio SHG_frequencies.
+        - SHG_frequencies : numpy.ndarray
+            Frecuencias de la segunda armónica.
+        - pmf : numpy.ndarray
+            Factor de phase matching aplicado.
+
+    Notes:
+    ------
+    - pulse_y debe ser la envolvente del campo eléctrico (no intensidad).
+    - La convolución discreta resulta en el dominio de SHG_frequencies.
+    - El factor no lineal (d_eff) se asume constante (3.2e-12 m/V por defecto para KTP).
+    - Requiere que pulse_x y SHG_frequencies tengan la misma longitud.
+    """
+    # Validación de entradas
+    if len(pulse_y) != len(pulse_x):
+        raise ValueError("Las longitudes de pulse_y y pulse_x deben ser iguales.")
+    if len(pulse_x) != len(SHG_frequencies):
+        raise ValueError("pulse_x y SHG_frequencies deben tener la misma longitud.")
+
+    # instance of the crystal and phase matching
+    ktp = KTPCrystal()
+    pm = PhaseMatching(crystal=ktp, lambda_0_um=fundamental_wavelength_um)  # Calculate phase matching at fundamental wavelength
+    
+    # Cálculo de la función de phase matching
+    if poling_period_um is None:
+        # IMPORTANT:  the frequencies (pulse_x) must be the ones corresponding to the second harmonic
+        pmf = pm.phase_matching_function(SHG_frequencies, cavity_length, Lambda_um=None)
+    elif poling_period_um is not None:
+        # IMPORTANT:  the frequencies (pulse_x) must be the ones corresponding to the second harmonic
+        pmf = pm.phase_matching_function(SHG_frequencies, cavity_length, Lambda_um=poling_period_um)
+        
+    # Discrete convolution
+    conv_result = conv_discrete(pulse_y, pulse_y, pulse_x)  # self-convolution
+    
+    # Prduct of the convolution with the phase matching function
+    SHG_amplitud = conv_result * pmf
+    
+    # Factor no lineal y amplitud de SHG
+    # chi_2 = 2 * 3.2e-12  # χ^(2) ≈ 2 d_eff (m/V)
+    # SHG_amplitude = 1j * (omega_0 * chi_2 * cavity_length / (n_2omega * c)) * conv_result * pmf
+    
+    return SHG_amplitud, pulse_x, pmf
