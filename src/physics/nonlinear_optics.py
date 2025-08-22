@@ -22,7 +22,7 @@ class PhaseMatching:
         self.c = KTPCrystal.SPEED_OF_LIGHT_M_PER_S
         self.omega_0 = 2 * np.pi * self.c / (self.lambda_0_um * 1e-6)  # Frecuencia fundamental (rad/s)
 
-    def phase_mismatch(self, omega: Union[float, np.ndarray], axis: str = 'nz') -> Union[float, np.ndarray]:
+    def phase_mismatch(self, omega: Union[float, np.ndarray], axis: str = 'nz', poling_period_um: float = None) -> Union[float, np.ndarray]:
         """
         Calculates the phase mismatch Delta k(omega) for second harmonic generation (SHG). This approximation
         is valid for small deviations of $\omega$ around $2\omega_0$ and assumes that the GVM dominates the 
@@ -34,6 +34,8 @@ class PhaseMatching:
             The second-harmonic frequencies in rad/s.
         axis : str, optional
             The optical axis ('nx', 'ny', 'nz'). Default is 'nz'.
+        poling_period_um : float, optional
+            The poling period in micrometers (um) for quasi-phase matching (QPM).
 
         Returns
         -------
@@ -50,9 +52,9 @@ class PhaseMatching:
         - 2*omega_0 is the second-harmonic central frequency.
         """
         omega = np.asarray(omega)
-        omega_SHG_0 = 2 * self.omega_0  # Central frequency of the second harmonic
+        omega_SHG_0 = 2.0 * self.omega_0  # Central frequency of the second harmonic
 
-        # Convert frequencies to wavelengths (in μm) for group velocity calculation
+        # Convert frequencies to wavelengths (in um) for group velocity calculation
         lambda_0_um = self.lambda_0_um
         lambda_shg_0_um = (2 * np.pi * self.c / omega_SHG_0) * 1e6  # convert to micrometers
 
@@ -64,15 +66,29 @@ class PhaseMatching:
         if np.any(np.isnan(v_g_omega0)) or np.any(np.isnan(v_g_2omega0)) or np.any(np.isclose([v_g_omega0, v_g_2omega0], 0)):
             print("Warning: Invalid group velocity detected. Returning NaN.")
             return np.nan
-
+        
+        # Calculate refractive indices
+        n = self.crystal.refractive_index(wavelength_um=lambda_0_um, axis='nz')
+        n_SHG = self.crystal.refractive_index(wavelength_um=lambda_shg_0_um, axis='nz')
+        
+        # Delta k_0 (phase mismatch at central frequency)
+        delta_k0 = (omega_SHG_0 / self.c) * (n - n_SHG)  # Phase mismatch at central frequency
+        
+        # Adjust for QPM if poling period is provided
+        if poling_period_um is not None:
+            poling_period_m = poling_period_um * 1e-6  # Convert to meters
+            delta_k0 += 2.0 * np.pi / poling_period_m
+        
+        print(f"Poling period provided: {poling_period_um} um, delta_k0: {delta_k0:.20f} m^-1")
+        
         # Calculate Group Velocity Mismatch (GVM) term in s/m
         gvm_term = (1 / v_g_2omega0) - (1 / v_g_omega0)
 
         # Calculate phase mismatch in m^-1
-        delta_k = gvm_term * (omega - omega_SHG_0)
+        delta_k = delta_k0 + gvm_term * (omega - omega_SHG_0)
         return delta_k
     
-    def phase_matching_function(self, omega: Union[float, np.ndarray], L: float, Lambda_um: float = None, axis: str = 'nz') -> Union[float, np.ndarray]:
+    def phase_matching_function(self, omega: Union[float, np.ndarray], crystal_length: float, poling_period_um: float = None, axis: str = 'nz') -> Union[float, np.ndarray]:
         """
         Calculates the phase matching function Phi for second harmonic generation (SHG) with optional QPM.
 
@@ -80,9 +96,9 @@ class PhaseMatching:
         ----------
         omega : float or array
             The second-harmonic frequencies in rad/s.
-        L : float
+        crystal_length : float
             The length of the crystal in meters. Must be positive.
-        Lambda_um : float, optional
+        poling_period_um : float, optional
             The QPM grating period in micrometers (um). If None, standard phase matching is assumed.
         axis : str, optional
             The optical axis ('nx', 'ny', 'nz'). Default is 'nz'.
@@ -94,27 +110,21 @@ class PhaseMatching:
 
         Notes
         -----
-        Phi = sinc((Δk - 2π/Λ) * L / 2) if Lambda_um is provided, else sinc(Δk * L / 2).
-        Where Δk is calculated by phase_mismatch, and sinc(x) = sin(pi*x)/(pi*x).
+        Phi = sinc(Δk * L / 2), where Δk includes QPM adjustment from phase_mismatch.
+        sinc(x) = sin(pi*x)/(pi*x).
 
         Raises
         ------
         ValueError
-            If L is not positive.
+            If crystal_length is not positive.
         """
-        if L <= 0:
+        if crystal_length <= 0:
             raise ValueError("Crystal length L must be positive.")
 
         omega = np.asarray(omega)
-        delta_k = self.phase_mismatch(omega, axis=axis)
+        delta_k = self.phase_mismatch(omega, axis=axis, poling_period_um=poling_period_um)
 
-        if Lambda_um is not None:
-            Lambda_m = Lambda_um * 1e-6  # Convert to meters
-            delta_k_eff = delta_k - (2 * np.pi / Lambda_m)  # Effective phase mismatch with QPM
-        else:
-            delta_k_eff = delta_k
-
-        arg = delta_k_eff * L / 2
+        arg = delta_k * crystal_length / 2
         phi = np.sinc(arg / np.pi)  # np.sinc(x) = sin(pi*x)/(pi*x)
         return phi
     
