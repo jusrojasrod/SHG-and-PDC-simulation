@@ -385,31 +385,46 @@ class KTPCrystal_Kato:
         return np.sqrt(n_squared)
     
 
-def poling_period(lambda_fundametal_nm: float, crystal: KTPCrystal) -> float:
+def poling_period_um(fundamental_wavelength_um: float, crystal: KTPCrystal, axis: str = 'nz') -> float:
     """
-    Calculate the poling period for second harmonic generation (SHG).
-    
+    Calculates the optimal poling period (Λ) for quasi-phase matching (QPM) in SHG.
+
     Parameters
     ----------
-    lambda_fundametal_nm : float
-        The fundamental wavelength in nanometers (nm).
-    crystal : KTPCrsystal
-        The KTP crystal  instance used for optical properties.
-        
+    fundamental_wavelength_um : float
+        The fundamental wavelength in micrometers (um).
+    crystal : KTPCrystal
+        The KTP crystal instance used for optical properties.
+    axis : str, optional
+        The optical axis ('nx', 'ny', 'nz'). Default is 'nz'.
+
     Returns
     -------
     float
         The poling period in micrometers (um).
+
+    Notes
+    -----
+    The poling period is calculated as Λ = 2π / |Δk_0|, where Δk_0 = (ω_{SHG_0}/c) * (n_{2ω} - n_ω)
+    is the phase mismatch at the central frequency, neglecting GVM for initial approximation.
     """
-    lambda_fundamental_um = lambda_fundametal_nm * 1e-3 # convert nm to um
-    
+    c = 299792458.0  # Speed of light in m/s
+    # Calculate fundamental frequency
+    omega_0 = 2 * np.pi * c / (fundamental_wavelength_um * 1e-6)
+    omega_SHG_0 = 2 * omega_0
+
     # Refractive indices
-    n_fundamental = crystal.refractive_index(lambda_fundamental_um, axis='nz')
-    n_harmonic = crystal.refractive_index(lambda_fundamental_um / 2, axis='nz')
-    
-    # Poling period calculation
-    poling_period = ( lambda_fundamental_um / 2) * (1 / (n_harmonic - n_fundamental))  # (m)
-    return poling_period
+    n_omega = crystal.refractive_index(wavelength_um=fundamental_wavelength_um, axis=axis)
+    n_2omega = crystal.refractive_index(wavelength_um=fundamental_wavelength_um / 2, axis=axis)
+
+    # Phase mismatch at central frequency
+    delta_k0 = (omega_SHG_0 / c) * (n_2omega - n_omega)
+
+    # Poling period (Λ = 2π / |Δk_0| for first-order QPM)
+    poling_period_m = 2 * np.pi / abs(delta_k0)
+    poling_period_um = poling_period_m * 1e6  # Convert to micrometers
+
+    return poling_period_um
         
 
 if __name__ == "__main__":
